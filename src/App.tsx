@@ -47,9 +47,13 @@ import {
 } from './types/auth';
 import {
   clearAccessToken,
+  fetchCloudTasks,
+  fetchCloudUsers,
   googleSignIn,
   initAuth,
   logout,
+  saveCloudTasks,
+  saveCloudUsers,
 } from './services/googleAuth';
 import { DriveAuthError, saveLedgerToDrive } from './services/googleDrive';
 import {
@@ -401,14 +405,37 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  // Persist task ledger & currency locally
+  const [tasksCloudReady, setTasksCloudReady] = useState<boolean>(false);
+
+  // Load cloud tasks on initial mount if local tasks are empty/default
+  useEffect(() => {
+    let cancelled = false;
+    fetchCloudTasks().then((cloudTasks) => {
+      if (cancelled) return;
+      if (cloudTasks && cloudTasks.length > 0) {
+        setTasks((prev) => {
+          const hasLocalPopulated = prev.some(isRowPopulated);
+          return hasLocalPopulated ? prev : cloudTasks;
+        });
+      }
+      setTasksCloudReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist task ledger & currency locally and to Cloud Firestore
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(tasks));
     } catch {
       // ignore storage quota errors
     }
-  }, [tasks]);
+    if (tasksCloudReady) {
+      saveCloudTasks(tasks);
+    }
+  }, [tasks, tasksCloudReady]);
 
   // Background ticker for automatic 30-day archiving (runs every 60s & when tab becomes visible)
   useEffect(() => {
@@ -821,14 +848,15 @@ export default function App() {
     ]
   );
 
-  // Bootstrap user directory (syncing localStorage with persistent server store /api/users)
+  // Bootstrap user directory (syncing localStorage, /api/users, and Cloud Firestore)
   useEffect(() => {
     let cancelled = false;
     const bootstrap = async () => {
       let serverUsers: AppUser[] = [];
       try {
         const res = await fetch('/api/users');
-        if (res.ok) {
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
           const data = (await res.json()) as { users?: AppUser[] };
           if (Array.isArray(data.users)) {
             serverUsers = data.users;
@@ -838,12 +866,18 @@ export default function App() {
         // ignore offline
       }
 
+      const cloudUsers = await fetchCloudUsers();
       if (cancelled) return;
 
       const localUsers = loadStoredUsers();
       const mergedMap = new Map<string, AppUser>();
-      for (const u of serverUsers) {
+      for (const u of cloudUsers) {
         if (u && typeof u.username === 'string') {
+          mergedMap.set(u.username.toLowerCase(), u);
+        }
+      }
+      for (const u of serverUsers) {
+        if (u && typeof u.username === 'string' && !mergedMap.has(u.username.toLowerCase())) {
           mergedMap.set(u.username.toLowerCase(), u);
         }
       }
@@ -869,7 +903,7 @@ export default function App() {
     };
   }, []);
 
-  // Persist user accounts to localStorage and server /api/users
+  // Persist user accounts to localStorage, server /api/users, and Cloud Firestore
   useEffect(() => {
     if (!usersReady || users.length === 0) return;
     try {
@@ -877,6 +911,7 @@ export default function App() {
     } catch {
       // ignore
     }
+    saveCloudUsers(users);
     fetch('/api/users', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

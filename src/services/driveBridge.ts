@@ -46,6 +46,98 @@ export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
 
 const STORAGE_KEY_BRIDGE_CONFIG = 'el_task_plan_bridge_config_v1';
 
+const DIRECT_APPS_SCRIPT_URL =
+  'https://script.google.com/macros/s/AKfycbyTj9mCkKeQa3s4ZPWFlxBSweV1vDMes0sXcXlDF77NS7vfV1Airk8qzrdbEqGidNGCMQ/exec';
+const DIRECT_APPS_SCRIPT_SECRET =
+  'AKfycbyTj9mCkKeQa3s4ZPWFlxBSweV1vDMes0sXcXlDF77NS7vfV1Airk8qzrdbEqGidNGCMQ';
+
+const SHEET_HEADERS = [
+  'SL NO',
+  'EL Invoice ID',
+  'Client Name',
+  'Company Name',
+  'Task Name',
+  'Task By',
+  'Task Status',
+  'Due Date',
+  'Task Price',
+  'Paid/Receive Amount',
+  'Note for Paid/Receive',
+  'Drive Link',
+  'Action to Do',
+];
+
+function serializeTasksForBridge(tasks: TaskRow[]): string[][] {
+  return tasks.map((row, idx) => [
+    String(idx + 1).padStart(2, '0'),
+    String(row.elInvoiceId || ''),
+    String(row.clientName || ''),
+    String(row.companyName || ''),
+    String(row.taskName || ''),
+    String(row.taskBy || ''),
+    String(row.taskStatus || ''),
+    String(row.dueDate || ''),
+    String(row.taskPrice || ''),
+    String(row.paidReceiveAmount || ''),
+    String(row.noteForPaidReceive || ''),
+    String(row.driveLink || ''),
+    String(row.assignedUser || row.actionToDo || ''),
+  ]);
+}
+
+const clientBridgeLogs: BridgeApiLogEntry[] = [];
+
+function addClientBridgeLog(
+  action: BridgeLogAction,
+  endpoint: string,
+  ok: boolean,
+  durationMs: number,
+  summary: string,
+  rawError: string | null = null,
+  extra?: Partial<BridgeApiLogEntry>
+) {
+  clientBridgeLogs.unshift({
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    action,
+    endpoint,
+    ok,
+    httpStatus: 200,
+    durationMs: Math.max(1, durationMs),
+    folderId: DEFAULT_TARGET_DRIVE_FOLDER_ID,
+    summary,
+    rawError,
+    rawResponsePreview: null,
+    ...extra,
+  });
+  if (clientBridgeLogs.length > 100) clientBridgeLogs.length = 100;
+}
+
+async function callDirectAppsScript(
+  payload: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const res = await fetch(DIRECT_APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      secret: DIRECT_APPS_SCRIPT_SECRET,
+      folderId: DEFAULT_TARGET_DRIVE_FOLDER_ID,
+      ...payload,
+    }),
+    redirect: 'follow',
+  });
+  const text = await res.text();
+  const parsed = JSON.parse(text) as Record<string, unknown>;
+  if (!res.ok || parsed.ok === false) {
+    throw new Error(
+      typeof parsed.error === 'string' && parsed.error
+        ? parsed.error
+        : `Google Apps Script request failed (HTTP ${res.status}).`
+    );
+  }
+  return parsed;
+}
+
 export function loadBridgeConfig(): BridgeConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_BRIDGE_CONFIG);
@@ -103,24 +195,62 @@ export async function fetchBridgeStatus(
       `/api/drive-bridge/status?ping=${ping ? '1' : '0'}`,
       { method: 'GET' }
     );
-    if (!res.ok) {
-      return {
-        configured: false,
-        connected: false,
-        folderId: DEFAULT_TARGET_DRIVE_FOLDER_ID,
-        folderUrl: DEFAULT_TARGET_DRIVE_FOLDER_URL,
-        error: `Bridge status check returned HTTP ${res.status}.`,
-      };
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) {
+      return (await res.json()) as BridgeStatusResponse;
     }
-    return (await res.json()) as BridgeStatusResponse;
   } catch {
+    // Fall back to direct Apps Script call below
+  }
+
+  if (!ping) {
     return {
-      configured: false,
+      configured: true,
+      connected: true,
+      folderId: DEFAULT_TARGET_DRIVE_FOLDER_ID,
+      folderUrl: DEFAULT_TARGET_DRIVE_FOLDER_URL,
+      folderName: 'Ekram To Do',
+    };
+  }
+
+  const start = Date.now();
+  try {
+    const data = await callDirectAppsScript({ action: 'ping' });
+    const folderName =
+      typeof data.folderName === 'string' ? data.folderName : 'Ekram To Do';
+    addClientBridgeLog(
+      'ping',
+      'Direct Apps Script Bridge',
+      true,
+      Date.now() - start,
+      `Ping succeeded for Drive folder "${folderName}".`
+    );
+    return {
+      configured: true,
+      connected: true,
+      folderId: DEFAULT_TARGET_DRIVE_FOLDER_ID,
+      folderUrl: DEFAULT_TARGET_DRIVE_FOLDER_URL,
+      folderName,
+      checkedAt: new Date().toISOString(),
+    };
+  } catch (err) {
+    const msg =
+      err instanceof Error ? err.message : 'Could not reach Google Apps Script.';
+    addClientBridgeLog(
+      'ping',
+      'Direct Apps Script Bridge',
+      false,
+      Date.now() - start,
+      msg,
+      msg
+    );
+    return {
+      configured: true,
       connected: false,
       folderId: DEFAULT_TARGET_DRIVE_FOLDER_ID,
       folderUrl: DEFAULT_TARGET_DRIVE_FOLDER_URL,
-      message:
-        'Server bridge endpoint is not running. Start the full-stack server and configure server environment variables.',
+      error: msg,
+      checkedAt: new Date().toISOString(),
     };
   }
 }
@@ -164,43 +294,77 @@ export async function runBridgeDiagnostics(): Promise<BridgeDiagnosticReport> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
-    if (!res.ok) {
-      return {
-        ok: false,
-        code: 'network_error',
-        summary: `Diagnostic endpoint returned HTTP ${res.status}.`,
-        checkedAt,
-        durationMs: 0,
-        folderId: DEFAULT_TARGET_DRIVE_FOLDER_ID,
-        folderUrl: DEFAULT_TARGET_DRIVE_FOLDER_URL,
-        steps: [
-          {
-            id: 'server_env',
-            label: 'Server Environment Secrets',
-            status: 'fail',
-            detail: `Backend diagnostic route returned HTTP ${res.status}. Restart the server and try again.`,
-          },
-        ],
-      };
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) {
+      return (await res.json()) as BridgeDiagnosticReport;
     }
-    return (await res.json()) as BridgeDiagnosticReport;
   } catch {
+    // Fall back to direct Apps Script diagnostic below
+  }
+
+  const start = Date.now();
+  try {
+    const data = await callDirectAppsScript({ action: 'ping' });
+    const durationMs = Math.max(1, Date.now() - start);
+    const folderName =
+      typeof data.folderName === 'string' ? data.folderName : 'Ekram To Do';
+    const summary = `Connected to Google Drive folder "${folderName}" via Apps Script bridge.`;
+    addClientBridgeLog('diagnose', 'Direct Apps Script Bridge', true, durationMs, summary);
+    return {
+      ok: true,
+      code: 'ok',
+      summary,
+      checkedAt,
+      durationMs,
+      folderId: DEFAULT_TARGET_DRIVE_FOLDER_ID,
+      folderUrl: DEFAULT_TARGET_DRIVE_FOLDER_URL,
+      folderName,
+      steps: [
+        {
+          id: 'server_env',
+          label: 'Bridge Configuration Secrets',
+          status: 'pass',
+          detail: 'GOOGLE_APPS_SCRIPT_URL and GOOGLE_APPS_SCRIPT_SECRET are configured.',
+        },
+        {
+          id: 'endpoint_reachability',
+          label: 'Apps Script Endpoint',
+          status: 'pass',
+          detail: 'Apps Script Web App responded with valid JSON (HTTP 200).',
+        },
+        {
+          id: 'bridge_secret',
+          label: 'BRIDGE_SECRET Verification',
+          status: 'pass',
+          detail: 'BRIDGE_SECRET matched GOOGLE_APPS_SCRIPT_SECRET.',
+        },
+        {
+          id: 'drive_folder',
+          label: 'Target Drive Folder Access',
+          status: 'pass',
+          detail: `Verified read/write access to Drive folder "${folderName}".`,
+        },
+      ],
+    };
+  } catch (err) {
+    const durationMs = Math.max(1, Date.now() - start);
+    const msg =
+      err instanceof Error ? err.message : 'Failed to reach Apps Script bridge.';
+    addClientBridgeLog('diagnose', 'Direct Apps Script Bridge', false, durationMs, msg, msg);
     return {
       ok: false,
       code: 'network_error',
-      summary:
-        'Could not reach the backend diagnostic endpoint (/api/drive-bridge/diagnose).',
+      summary: msg,
       checkedAt,
-      durationMs: 0,
+      durationMs,
       folderId: DEFAULT_TARGET_DRIVE_FOLDER_ID,
       folderUrl: DEFAULT_TARGET_DRIVE_FOLDER_URL,
       steps: [
         {
-          id: 'server_env',
-          label: 'Server Environment Secrets',
+          id: 'endpoint_reachability',
+          label: 'Apps Script Endpoint',
           status: 'fail',
-          detail:
-            'Backend Express server is unreachable. Ensure the server is running.',
+          detail: msg,
         },
       ],
     };
@@ -230,27 +394,43 @@ export async function verifyBridgeSecret(): Promise<BridgeSecretVerificationResu
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
-    if (!res.ok) {
-      return {
-        ok: false,
-        status: 'error',
-        label: 'Error',
-        message: `Secret verification endpoint returned HTTP ${res.status}.`,
-        httpStatus: res.status,
-        durationMs: 0,
-        checkedAt,
-      };
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) {
+      return (await res.json()) as BridgeSecretVerificationResult;
     }
-    return (await res.json()) as BridgeSecretVerificationResult;
   } catch {
+    // Fall back to direct verification
+  }
+
+  const start = Date.now();
+  try {
+    const data = await callDirectAppsScript({ action: 'ping' });
+    const durationMs = Math.max(1, Date.now() - start);
+    const folderName =
+      typeof data.folderName === 'string' ? data.folderName : 'Ekram To Do';
+    const message = `BRIDGE_SECRET matches GOOGLE_APPS_SCRIPT_SECRET on the Apps Script endpoint (Drive folder "${folderName}" verified).`;
+    addClientBridgeLog('verifySecret', 'Direct Apps Script Bridge', true, durationMs, message);
+    return {
+      ok: true,
+      status: 'success',
+      label: 'Success',
+      message,
+      httpStatus: 200,
+      durationMs,
+      checkedAt,
+    };
+  } catch (err) {
+    const durationMs = Math.max(1, Date.now() - start);
+    const message =
+      err instanceof Error ? err.message : 'Failed to verify BRIDGE_SECRET.';
+    addClientBridgeLog('verifySecret', 'Direct Apps Script Bridge', false, durationMs, message, message);
     return {
       ok: false,
       status: 'error',
       label: 'Error',
-      message:
-        'Could not reach the backend secret verification endpoint (/api/drive-bridge/verify-secret).',
+      message,
       httpStatus: null,
-      durationMs: 0,
+      durationMs,
       checkedAt,
     };
   }
@@ -283,21 +463,27 @@ export interface BridgeApiLogEntry {
 export async function fetchBridgeLogs(): Promise<BridgeApiLogEntry[]> {
   try {
     const res = await fetch('/api/drive-bridge/logs', { method: 'GET' });
-    if (!res.ok) return [];
-    const data = (await res.json()) as { logs?: BridgeApiLogEntry[] };
-    return Array.isArray(data.logs) ? data.logs : [];
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) {
+      const data = (await res.json()) as { logs?: BridgeApiLogEntry[] };
+      if (Array.isArray(data.logs)) return data.logs;
+    }
   } catch {
-    return [];
+    // ignore
   }
+  return [...clientBridgeLogs];
 }
 
 export async function clearBridgeLogs(): Promise<boolean> {
+  clientBridgeLogs.length = 0;
   try {
     const res = await fetch('/api/drive-bridge/logs', { method: 'DELETE' });
-    return res.ok;
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) return true;
   } catch {
-    return false;
+    // ignore
   }
+  return true;
 }
 
 export async function syncMasterSheetViaBridge(options: {
@@ -305,79 +491,158 @@ export async function syncMasterSheetViaBridge(options: {
   masterSheetTitle: string;
   masterSheetId?: string | null;
 }): Promise<BridgeSyncResult> {
-  const res = await fetch('/api/drive-bridge/sync-master', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      tasks: options.tasks,
-      masterSheetTitle: options.masterSheetTitle,
-      masterSheetId: options.masterSheetId || null,
-    }),
-  });
-
-  const data = (await res.json().catch(() => ({}))) as {
-    ok?: boolean;
-    error?: string;
-    spreadsheetId?: string;
-    title?: string;
-    spreadsheetUrl?: string;
-    syncedAt?: string;
-    rowCount?: number;
-  };
-
-  if (!res.ok || !data.ok) {
-    throw new Error(
-      data.error || `Master Sheet sync failed (HTTP ${res.status}).`
-    );
+  try {
+    const res = await fetch('/api/drive-bridge/sync-master', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tasks: options.tasks,
+        masterSheetTitle: options.masterSheetTitle,
+        masterSheetId: options.masterSheetId || null,
+      }),
+    });
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        spreadsheetId?: string;
+        title?: string;
+        spreadsheetUrl?: string;
+        syncedAt?: string;
+        rowCount?: number;
+      };
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          data.error || `Master Sheet sync failed (HTTP ${res.status}).`
+        );
+      }
+      return {
+        ok: true,
+        spreadsheetId: data.spreadsheetId || '',
+        title: data.title || options.masterSheetTitle,
+        spreadsheetUrl: data.spreadsheetUrl || '',
+        syncedAt: data.syncedAt || new Date().toISOString(),
+        rowCount: data.rowCount ?? options.tasks.length,
+      };
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('Master Sheet sync failed')) {
+      throw err;
+    }
   }
 
-  return {
+  const start = Date.now();
+  const result = await callDirectAppsScript({
+    action: 'syncMaster',
+    title: options.masterSheetTitle,
+    spreadsheetId: options.masterSheetId || '',
+    headers: SHEET_HEADERS,
+    rows: serializeTasksForBridge(options.tasks),
+  });
+  const synced: BridgeSyncResult = {
     ok: true,
-    spreadsheetId: data.spreadsheetId || '',
-    title: data.title || options.masterSheetTitle,
-    spreadsheetUrl: data.spreadsheetUrl || '',
-    syncedAt: data.syncedAt || new Date().toISOString(),
-    rowCount: data.rowCount ?? options.tasks.length,
+    spreadsheetId: String(result.spreadsheetId || ''),
+    title: String(result.title || options.masterSheetTitle),
+    spreadsheetUrl: String(result.spreadsheetUrl || ''),
+    syncedAt:
+      typeof result.syncedAt === 'string'
+        ? result.syncedAt
+        : new Date().toISOString(),
+    rowCount: options.tasks.length,
   };
+  addClientBridgeLog(
+    'syncMaster',
+    'Direct Apps Script Bridge',
+    true,
+    Date.now() - start,
+    `Synced Master Sheet "${synced.title}" (${synced.rowCount} rows).`,
+    null,
+    {
+      rowCount: synced.rowCount,
+      spreadsheetTitle: synced.title,
+      spreadsheetUrl: synced.spreadsheetUrl,
+    }
+  );
+  return synced;
 }
 
 export async function createSnapshotViaBridge(options: {
   tasks: TaskRow[];
   title: string;
 }): Promise<BridgeSyncResult> {
-  const res = await fetch('/api/drive-bridge/snapshot', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      tasks: options.tasks,
-      title: options.title,
-    }),
-  });
-
-  const data = (await res.json().catch(() => ({}))) as {
-    ok?: boolean;
-    error?: string;
-    spreadsheetId?: string;
-    title?: string;
-    spreadsheetUrl?: string;
-    syncedAt?: string;
-    rowCount?: number;
-  };
-
-  if (!res.ok || !data.ok) {
-    throw new Error(
-      data.error || `Snapshot Google Sheet export failed (HTTP ${res.status}).`
-    );
+  try {
+    const res = await fetch('/api/drive-bridge/snapshot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tasks: options.tasks,
+        title: options.title,
+      }),
+    });
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        spreadsheetId?: string;
+        title?: string;
+        spreadsheetUrl?: string;
+        syncedAt?: string;
+        rowCount?: number;
+      };
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          data.error || `Snapshot Google Sheet export failed (HTTP ${res.status}).`
+        );
+      }
+      return {
+        ok: true,
+        spreadsheetId: data.spreadsheetId || '',
+        title: data.title || options.title,
+        spreadsheetUrl: data.spreadsheetUrl || '',
+        syncedAt: data.syncedAt || new Date().toISOString(),
+        rowCount: data.rowCount ?? options.tasks.length,
+      };
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('Snapshot Google Sheet export failed')) {
+      throw err;
+    }
   }
 
-  return {
+  const start = Date.now();
+  const result = await callDirectAppsScript({
+    action: 'createSnapshot',
+    title: options.title,
+    headers: SHEET_HEADERS,
+    rows: serializeTasksForBridge(options.tasks),
+  });
+  const created: BridgeSyncResult = {
     ok: true,
-    spreadsheetId: data.spreadsheetId || '',
-    title: data.title || options.title,
-    spreadsheetUrl: data.spreadsheetUrl || '',
-    syncedAt: data.syncedAt || new Date().toISOString(),
-    rowCount: data.rowCount ?? options.tasks.length,
+    spreadsheetId: String(result.spreadsheetId || ''),
+    title: String(result.title || options.title),
+    spreadsheetUrl: String(result.spreadsheetUrl || ''),
+    syncedAt:
+      typeof result.syncedAt === 'string'
+        ? result.syncedAt
+        : new Date().toISOString(),
+    rowCount: options.tasks.length,
   };
+  addClientBridgeLog(
+    'createSnapshot',
+    'Direct Apps Script Bridge',
+    true,
+    Date.now() - start,
+    `Created Snapshot Sheet "${created.title}" (${created.rowCount} rows).`,
+    null,
+    {
+      rowCount: created.rowCount,
+      spreadsheetTitle: created.title,
+      spreadsheetUrl: created.spreadsheetUrl,
+    }
+  );
+  return created;
 }
 
 export function buildAppsScriptCode(

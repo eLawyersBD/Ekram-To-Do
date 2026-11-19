@@ -6,7 +6,15 @@ import {
   onAuthStateChanged,
   type User,
 } from 'firebase/auth';
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  setDoc,
+} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+import type { AppUser } from '../types/auth';
+import type { TaskRow } from '../types/task';
 
 export const SCOPES = [
   'https://www.googleapis.com/auth/drive',
@@ -19,6 +27,59 @@ export const SCOPES = [
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+export const db = getFirestore(app);
+
+export async function fetchCloudUsers(): Promise<AppUser[]> {
+  try {
+    const snap = await getDoc(doc(db, 'ekramTodo', 'users'));
+    if (snap.exists()) {
+      const data = snap.data() as { users?: AppUser[] };
+      if (Array.isArray(data.users)) {
+        return data.users;
+      }
+    }
+  } catch {
+    // ignore offline/rule notice
+  }
+  return [];
+}
+
+export async function saveCloudUsers(users: AppUser[]): Promise<void> {
+  try {
+    await setDoc(doc(db, 'ekramTodo', 'users'), {
+      users,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch {
+    // ignore offline
+  }
+}
+
+export async function fetchCloudTasks(): Promise<TaskRow[] | null> {
+  try {
+    const snap = await getDoc(doc(db, 'ekramTodo', 'tasks'));
+    if (snap.exists()) {
+      const data = snap.data() as { tasks?: TaskRow[] };
+      if (Array.isArray(data.tasks) && data.tasks.length > 0) {
+        return data.tasks;
+      }
+    }
+  } catch {
+    // ignore offline
+  }
+  return null;
+}
+
+export async function saveCloudTasks(tasks: TaskRow[]): Promise<void> {
+  try {
+    await setDoc(doc(db, 'ekramTodo', 'tasks'), {
+      tasks,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch {
+    // ignore offline
+  }
+}
 
 const provider = new GoogleAuthProvider();
 SCOPES.forEach((scope) => {

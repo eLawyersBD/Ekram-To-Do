@@ -7,5 +7,32 @@
     "role": "admin",
     "isActive": true,
     "createdAt": "2026-11-19T17:27:11.712Z"
+  },
+  {
+    "id": "fb9a4a78-ae51-4828-b99d-e53c9e97e774",
+    "username": "milton",
+    "fullName": "Milton Mondol",
+    "passwordHash": "2c7cb7f70ebbaefc991722695ec3225dad7f72c3ea993d46b8c2194b018b11fb",
+    "role": "user",
+    "isActive": true,
+    "createdAt": "2026-11-19T18:06:46.985Z"
+  },
+  {
+    "id": "1a85a4e0-d851-4432-ba16-dc53b99fc444",
+    "username": "rafik",
+    "fullName": "Md. Rafik",
+    "passwordHash": "2c7cb7f70ebbaefc991722695ec3225dad7f72c3ea993d46b8c2194b018b11fb",
+    "role": "user",
+    "isActive": true,
+    "createdAt": "2026-11-19T18:07:19.196Z"
+  },
+  {
+    "id": "1a8e7251-3b22-4949-8609-cc40d0b89a8e",
+    "username": "mianuddin",
+    "fullName": "Md. Mainuddin",
+    "passwordHash": "2c7cb7f70ebbaefc991722695ec3225dad7f72c3ea993d46b8c2194b018b11fb",
+    "role": "user",
+    "isActive": true,
+    "createdAt": "2026-11-19T18:08:01.223Z"
   }
 ]

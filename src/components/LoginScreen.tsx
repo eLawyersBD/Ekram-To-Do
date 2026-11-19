@@ -103,7 +103,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <Lock className="h-3 w-3 text-[#1A365D]" />
             Workspace:
             <span className="font-mono font-semibold text-slate-800">
-              ekram.accounticca.com
+              ekram.elawyersbd.com
             </span>
           </span>
           <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">

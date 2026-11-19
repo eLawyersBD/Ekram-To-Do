@@ -370,7 +370,8 @@ export const TaskLedgerTable: React.FC<TaskLedgerTableProps> = ({
 
   return (
     <div className="space-y-3">
-      {/* Direct Google Drive Folder Auto-Sync & Snapshot Toolbar */}
+      {/* Direct Google Drive Folder Auto-Sync & Snapshot Toolbar (Admin Only) */}
+      {isAdmin && (
       <div className="flex flex-col gap-2.5 rounded-xl border border-[#8FA6C1]/70 bg-gradient-to-r from-[#F4F8FD] via-white to-[#F2FAF6] px-4 py-2.5 text-xs shadow-2xs xl:flex-row xl:items-center xl:justify-between">
         <div
           role="status"
@@ -616,6 +617,7 @@ export const TaskLedgerTable: React.FC<TaskLedgerTableProps> = ({
           </button>
         </div>
       </div>
+      )}
 
       {/* Bulk-Action Toolbar — shown whenever 1+ rows are selected */}
       {selectedCount > 0 && (

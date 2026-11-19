@@ -1,0 +1,11 @@
+[
+  {
+    "id": "default-admin-account",
+    "username": "admin",
+    "fullName": "Administrator",
+    "passwordHash": "170e9cf27db04e1fbaf4e4ef6f9e5b0493df1acde3d3f0d4203cb91bc6f13064",
+    "role": "admin",
+    "isActive": true,
+    "createdAt": "2026-11-19T17:27:11.712Z"
+  }
+]

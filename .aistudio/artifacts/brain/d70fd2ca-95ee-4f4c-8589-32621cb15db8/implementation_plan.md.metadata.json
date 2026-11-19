@@ -1,0 +1,6 @@
+{
+  "summary": "Implementation plan for automatic, sign-in-free Google Drive folder integration (folder ID 1OjfZm2kE5F9yGnmdFIv8WZpuAPpu9VpG) using a server-proxied Google Apps Script Web App bridge with debounced master Google Sheet auto-sync, manual snapshot creation, and Admin-only bridge configuration.",
+  "updatedAt": "2026-11-19T14:26:25.483006674Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

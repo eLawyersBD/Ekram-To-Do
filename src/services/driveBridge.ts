@@ -35,13 +35,17 @@ export interface BridgeConfig {
 
 export type BridgeSyncState = 'idle' | 'syncing' | 'synced' | 'error';
 
+export const DEFAULT_MASTER_SHEET_ID = '1qrrtWhcBNbQP_NgJJSzzhcnM-jYC5z47nkswkw0SnQU';
+export const DEFAULT_MASTER_SHEET_URL =
+  'https://docs.google.com/spreadsheets/d/1qrrtWhcBNbQP_NgJJSzzhcnM-jYC5z47nkswkw0SnQU/edit';
+
 export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
   autoSyncEnabled: true,
   masterSheetTitle: 'Task Plan and Status — Master',
-  masterSheetId: null,
-  masterSheetUrl: null,
-  lastSyncedAt: null,
-  debounceSeconds: 3,
+  masterSheetId: DEFAULT_MASTER_SHEET_ID,
+  masterSheetUrl: DEFAULT_MASTER_SHEET_URL,
+  lastSyncedAt: '2026-11-22T19:02:49.726Z',
+  debounceSeconds: 2,
 };
 
 const STORAGE_KEY_BRIDGE_CONFIG = 'el_task_plan_bridge_config_v1';
@@ -156,15 +160,15 @@ export function loadBridgeConfig(): BridgeConfig {
         masterSheetId:
           typeof parsed.masterSheetId === 'string' && parsed.masterSheetId
             ? parsed.masterSheetId
-            : null,
+            : DEFAULT_BRIDGE_CONFIG.masterSheetId,
         masterSheetUrl:
           typeof parsed.masterSheetUrl === 'string' && parsed.masterSheetUrl
             ? parsed.masterSheetUrl
-            : null,
+            : DEFAULT_BRIDGE_CONFIG.masterSheetUrl,
         lastSyncedAt:
           typeof parsed.lastSyncedAt === 'string' && parsed.lastSyncedAt
             ? parsed.lastSyncedAt
-            : null,
+            : DEFAULT_BRIDGE_CONFIG.lastSyncedAt,
         debounceSeconds:
           typeof parsed.debounceSeconds === 'number' &&
           parsed.debounceSeconds >= 1 &&

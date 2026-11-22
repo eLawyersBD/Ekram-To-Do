@@ -518,23 +518,6 @@ export const TaskLedgerTable: React.FC<TaskLedgerTableProps> = ({
               </a>
             </>
           )}
-
-          {lastSavedSheet && (
-            <>
-              <span className="text-slate-300" aria-hidden="true">
-                ·
-              </span>
-              <a
-                href={lastSavedSheet.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline whitespace-nowrap"
-              >
-                <span>Open “{lastSavedSheet.title}”</span>
-                <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
-              </a>
-            </>
-          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -574,44 +557,6 @@ export const TaskLedgerTable: React.FC<TaskLedgerTableProps> = ({
                 {masterSyncHasError
                   ? 'Retry Master Sheet Sync'
                   : 'Sync to Master Sheet'}
-              </>
-            )}
-          </button>
-
-          <span
-            className="hidden sm:inline-block h-5 w-px bg-slate-200"
-            aria-hidden="true"
-          />
-
-          <input
-            type="text"
-            value={sheetTitleInput}
-            onChange={(e) => setSheetTitleInput(e.target.value)}
-            aria-label="Snapshot Google Sheet title"
-            placeholder="Snapshot Google Sheet name..."
-            className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#1A365D] focus:outline-none focus:ring-1 focus:ring-[#1A365D] sm:w-52"
-          />
-          <button
-            type="button"
-            onClick={handleTriggerSheetExport}
-            disabled={isExportingSheet || rows.length === 0}
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
-          >
-            {isExportingSheet ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                Saving Snapshot...
-              </>
-            ) : (
-              <>
-                <FileSpreadsheet className="h-3.5 w-3.5" aria-hidden="true" />
-                {selectedCount > 0
-                  ? `Save ${selectedCount} Selected to Google Sheet`
-                  : bridgeConnected
-                    ? 'Save Snapshot to Drive Folder'
-                    : isSignedIn
-                      ? 'Save Snapshot to Drive Folder'
-                      : 'Sign in & Save Snapshot'}
               </>
             )}
           </button>
